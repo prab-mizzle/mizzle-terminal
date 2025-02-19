@@ -183,10 +183,10 @@ pub async fn open_terminal(
 #[axum::debug_handler]
 pub async fn close_terminal(
     Path(session_id): Path<String>,
-    State(shutdown_signal): State<Sender<String>>
+    State(shutdown_signal): State<ClonableRecv>
 ) -> impl IntoResponse {
 
-    let resp = match shutdown_signal.send(session_id.to_string()) {
+    let resp = match shutdown_signal.0.send(session_id.to_string()) {
         Ok(_) => { 
             Response::new("+ shutdown signal sent succesfully".to_string())
         }

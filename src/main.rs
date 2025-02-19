@@ -76,10 +76,10 @@ async fn main() {
 
     let route_1 = Router::new()
         .route("/start_web_session/{uid}", get(routes::open_terminal))
-        .with_state((clonable_recv, notifier.clone()));
+        .with_state((clonable_recv.clone(), notifier.clone()));
     let route_2 = Router::new()
         .route("/terminate_web_session/{uid}", get(routes::close_terminal))
-        .with_state(sender_tx.clone()); 
+        .with_state(clonable_recv); 
 
     let app= Router::new().merge(route_1).merge(route_2);
 
