@@ -90,17 +90,8 @@ pub async fn open_terminal(
                         return Err(BindingStatus::PortNotFound("Port value not found in logs !".to_string()));
                     };
 
-                    //set session values for repsonse from request !
-                    let domain = match url::Url::from_str(&format!("http://bore.pub:{}", port_str)) {
-                        Ok(val) => {
-                            val
-                        }
-                        Err(err) => { 
-                            println!("failed to parse url string: {}", err);
-                            return Err(BindingStatus::Error(format!("Url parsing error: {}", err)));
-                        }
-                    };
-
+                    let domain = format!("http://bore.pub:{}", port_str);
+                    println!("+ listening on domain : {domain}");
                     let session_uid = uuid::Uuid::new_v4().as_hyphenated().to_string(); 
 
                     let shared_session_uid = session_uid.clone(); 

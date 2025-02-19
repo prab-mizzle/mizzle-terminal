@@ -7,7 +7,7 @@ use url::Url;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ContainerBindingResponse {
     pub session_id: Option<String>, 
-    pub url: Option<Url>,
+    pub url: Option<String>,
     pub status: BindingStatus
 }
 
