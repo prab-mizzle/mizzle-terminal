@@ -10,12 +10,12 @@ use crate::{obj::{BindingStatus, ContainerBindingResponse}, ClonableRecv};
 #[axum::debug_handler]
 //parametrize the function to accept diff. confg. as per future requirement
 pub async fn open_terminal(
-        Path(instance_id): Path<Uuid>, 
+        Path(instance_id): Path<String>, 
         State((mut shutdown_recv, global_shutdown_notifier)): State<(ClonableRecv, Arc<Notify>)>
 ) -> impl IntoResponse {
     
     //todo: implement sanitation 
-    let sanitized_instance_id = instance_id.to_string().trim().to_string(); 
+    let sanitized_instance_id = instance_id.trim().to_string(); 
 
     // select port range for starting ttyd instance 
     let random_port = match PortPicker::new().pick() {
@@ -165,7 +165,7 @@ pub async fn open_terminal(
 
 #[axum::debug_handler]
 pub async fn close_terminal(
-    Path(session_id): Path<Uuid>,
+    Path(session_id): Path<String>,
     State(shutdown_signal): State<Sender<String>>
 ) -> impl IntoResponse {
 

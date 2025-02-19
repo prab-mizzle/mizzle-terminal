@@ -30,7 +30,7 @@ async fn main() {
 
         (Ok(ttyd), _)
             if ttyd != ttyd_version => {
-                println!("𝘟 ttyd incorrect version present ");
+                println!("𝘟 ttyd incorrect version present: {}", unsafe { std::str::from_utf8_unchecked(&ttyd) });
         }
 
         (_, Ok(bore)) 
