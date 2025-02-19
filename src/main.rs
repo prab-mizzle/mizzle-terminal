@@ -11,8 +11,8 @@ async fn main() {
     let port = "0.0.0.0:9001"; 
 
     // Insert checks for presence for bore & ttyd ! 
-    let ttyd_util = "ttyd --version";
-    let bore_util = "bore --version";
+    let ttyd_util = "ttyd";
+    let bore_util = "bore";
     
     let bore_version = b"bore-cli 0.5.2";  
     let ttyd_version = b"ttyd version 1.7.4-68521f5"; 
