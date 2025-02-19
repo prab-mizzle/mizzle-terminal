@@ -44,6 +44,8 @@ pub async fn open_terminal(
         .arg("sh")
         .arg("-c")
         .arg(r#"/bin/bash"#)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn();
 
     let bore_session = Command::new("bore")
@@ -89,7 +91,7 @@ pub async fn open_terminal(
                     };
 
                     //set session values for repsonse from request !
-                    let domain = match url::Url::from_str(&format!("http:bore.pub:{}", port_str)) {
+                    let domain = match url::Url::from_str(&format!("http://bore.pub:{}", port_str)) {
                         Ok(val) => {
                             val
                         }
