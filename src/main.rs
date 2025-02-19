@@ -70,7 +70,7 @@ async fn main() {
         }
     };
 
-    let (mut sender_tx, mut waker_tx ) = broadcast::channel::<String>(16);
+    let (mut sender_tx, mut waker_tx ) = broadcast::channel::<String>(1000);
     let mut notifier = std::sync::Arc::new(Notify::new()); 
     let clonable_recv = ClonableRecv::new(sender_tx.clone()); 
 
