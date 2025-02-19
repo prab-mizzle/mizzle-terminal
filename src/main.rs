@@ -8,7 +8,7 @@ mod obj;
 #[tokio::main]
 async fn main() {
 
-    let port = "0.0.0.0:80"; 
+    let port = "0.0.0.0:9001"; 
 
     // Insert checks for presence for bore & ttyd ! 
     let ttyd_util = "ttyd --version";
@@ -21,23 +21,41 @@ async fn main() {
     let bore_check = utils::get_program_version(&bore_util); 
     
     match tokio::join!(ttyd_check, bore_check) { 
-        (Ok(ttyd), _) 
-            if ttyd != ttyd_version => {
-                println!("𝘟 ttyd incorrect version present ");
-        }
-        (_, Ok(bore)) 
-            if bore != bore_version => {
-                println!("𝘟 bore incorrect version present ");
-        }
+
         (Ok(ttyd), Ok(bore)) 
             if bore == bore_version && ttyd == ttyd_version => {
                 println!("✔ ttyd present ");
                 println!("✔ bore present ");
         }
-        _ => {
-            println!("- program failed to run !");
+
+        (Ok(ttyd), _)
+            if ttyd != ttyd_version => {
+                println!("𝘟 ttyd incorrect version present ");
+        }
+
+        (_, Ok(bore)) 
+            if bore != bore_version => {
+                println!("𝘟 bore incorrect version present ");
+        }
+
+        (Err(ttyd_err), Err(bore_err)) => {
+            println!("- both program failed to run ! ttyd: {ttyd_err}, bore: {bore_err}");
             return ; //exit program gracefully
         }
+        
+        (_, Err(bore_err)) => {
+            println!("- bore program failed to run !: {bore_err}");
+            return ; //exit program gracefully
+        }
+        (Err(ttyd_err), _) => {
+            println!("- ttyd program failed to run !: {ttyd_err}");
+            return ; //exit program gracefully
+        }
+        _ => { 
+            println!("- both program abruptly failed to run ");
+            return ; 
+        }
+
     };
 
     let listener = match tokio::net::TcpListener::bind(port).await
