@@ -94,17 +94,18 @@ pub async fn open_terminal(
                     println!("+ listening on domain : {domain}");
                     let session_uid = uuid::Uuid::new_v4().as_hyphenated().to_string(); 
 
-                    let shared_session_uid = session_uid.clone(); 
+                    let shared_session_uid_one = session_uid.clone(); 
+                    let shared_session_uid_two = session_uid.clone(); 
+                    let notifier_one = global_shutdown_notifier.clone(); 
+                    let notifier_two = global_shutdown_notifier.clone(); 
+                    let mut sh_recv_one = shutdown_recv.0.subscribe(); 
+                    let mut sh_recv_two = shutdown_recv.0.subscribe(); 
 
                     tokio::spawn(async move {  
-                        let global_shutdown_handle = global_shutdown_notifier.notified(); 
+                        let global_shutdown_handle = notifier_one.notified(); 
                         tokio::pin!(global_shutdown_handle);
                         loop { 
                             tokio::select! { 
-                                _ = ttyd.wait() => { 
-
-                                }
-
                                 _ = bore.wait() => { 
 
                                 }
@@ -112,13 +113,36 @@ pub async fn open_terminal(
                                 _ = &mut global_shutdown_handle => {
                                     println!("+ global shutdown req "); 
                                     bore.kill().await; 
+                                }
+
+                                Ok(uid) = sh_recv_one.recv() =>  {
+                                    if shared_session_uid_one == uid  {
+                                        println!("+ shutdown req session uid: {}", uid); 
+                                        bore.kill().await; 
+                                    }
+                                }
+
+                            }
+                        }
+                    });
+
+                    tokio::spawn(async move {  
+                        let global_shutdown_handle = notifier_two.notified(); 
+                        tokio::pin!(global_shutdown_handle);
+                        loop { 
+                            tokio::select! { 
+                                _ = ttyd.wait() => { 
+                                    // println!("")
+                                }
+
+                                _ = &mut global_shutdown_handle => {
+                                    println!("+ global shutdown req "); 
                                     ttyd.kill().await; 
                                 }
 
-                                Ok(uid) = shutdown_recv.1.recv() =>  {
-                                    if shared_session_uid == uid  {
+                                Ok(uid) = sh_recv_two.recv() =>  {
+                                    if shared_session_uid_two == uid  {
                                         println!("+ shutdown req session uid: {}", uid); 
-                                        bore.kill().await; 
                                         ttyd.kill().await; 
                                     }
                                 }

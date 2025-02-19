@@ -87,6 +87,8 @@ async fn main() {
         println!("- error starting the application {err}");
     }
 
+    notifier.notify_waiters();
+
 }   
 
 struct ClonableRecv(pub Sender<String>,pub Receiver<String>);
