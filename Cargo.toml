@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 axum = {version = "0.8.1", features = ["macros"]}
+dashmap = "6.1.0"
 futures = "0.3.31"
 http-error-derive = "0.3.2"
 random-port = "0.1.1"
