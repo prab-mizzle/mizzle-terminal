@@ -16,7 +16,6 @@ use tokio::{
 
 use crate::obj::{BindingStatus, ContainerBindingResponse};
 
-#[axum::debug_handler]
 //parametrize the function to accept diff. confg. as per future requirement
 pub async fn open_terminal(
     Path(instance_id): Path<String>,
@@ -94,8 +93,19 @@ pub async fn open_terminal(
                         // Extract the number after `remote_port=`
                         if let Some(number) = last_part.split('=').last() {
                             println!("+ Listening port: {}", number);
-                            // number.parse::<u16>().expect("port number can't be converted to u16")
-                            number
+
+                            // Split the string at 'm' and take the part after it.
+                            if let Some(digits) = number.rsplit('m').next() {
+                                println!("Extracted digits: {}", digits);
+                                digits.to_string()
+                            } else {
+                                println!("- No digits found in port !");
+                                bore.kill().await;
+                                ttyd.kill().await;
+                                return Err(BindingStatus::PortNotFound(
+                                    "Failed to acquire port from logs".to_string(),
+                                ));
+                            }
                         } else {
                             bore.kill().await;
                             ttyd.kill().await;
@@ -110,32 +120,32 @@ pub async fn open_terminal(
                             "Port value not found in logs !".to_string(),
                         ));
                     };
-
-                    let domain = format!("http://bore.pub:{}", port_str);
+                    println!("port value: {:?}", port_str);
+                    let domain = format!(r#"http://bore.pub:{}"#, port_str);
                     println!("+ listening on domain : {domain}");
                     let session_uid = uuid::Uuid::new_v4().as_hyphenated().to_string();
 
                     let (mut tx, mut recv) = tokio::sync::watch::channel(());
 
                     tokio::spawn(async move {
-                        // loop {
+                        let ttyd_pid = ttyd.id();
                         tokio::select! {
                             _ = ttyd.wait() => {
                                  // when bore finishes it must ensure that any associated ttyd task is also dropped
                                 //  tokio::join!(ttyd.kill(), bore.kill());
                                 // bore.kill().await;
+                                bore.kill().await;
                             }
                             _ = bore.wait() => {
                                 // when bore finishes it must ensure that any associated ttyd task is also dropped
-                                // tokio::join!(ttyd.kill(), bore.kill());
-                                // ttyd.kill().await;
+                                ttyd.kill().await;
                             }
                             _ = recv.changed() =>  {
                                 println!("- task shutdown req : ");
-                                let pid = ttyd.id();
+
                                 match (bore.kill().await, ttyd.kill().await) {
                                     (Ok(_), Ok(_)) => {
-                                        println!("+ process shutdown success: pid ttyd: {pid:?}");
+                                        println!("+ process shutdown success: pid ttyd: {ttyd_pid:?}");
                                     }
                                     _ => {
                                         println!(" - process failed abruptly !");
@@ -144,15 +154,15 @@ pub async fn open_terminal(
                                 ()
                             }
                         }
-                        // }
                         ()
                     });
 
                     job_handle.insert(session_uid.clone(), tx);
 
                     let container_binding_resp = ContainerBindingResponse {
-                        session_id: Some(session_uid),
-                        url: Some(domain),
+                        session_id: session_uid,
+                        url: domain, //todo: change this to something concrete
+                        port: port_str.to_string(),
                         status: BindingStatus::Live,
                     };
 
@@ -167,20 +177,30 @@ pub async fn open_terminal(
                 }
             }
         }
+        (Ok(_), Err(bore_err)) => {
+            println!("- bore process failed to start: {bore_err}");
+            return Err(BindingStatus::Failed(format!(
+                "bore spawing error: {}",
+                bore_err.to_string()
+            )));
+        }
+        (Err(ttyd_err), Ok(_)) => {
+            println!("- ttyd process failed to start: {ttyd_err}");
+            return Err(BindingStatus::Failed(format!(
+                "ttyd spawing error: {}",
+                ttyd_err.to_string()
+            )));
+        }
         _ => {
             println!("process failed to start");
-            let resp = ContainerBindingResponse {
-                session_id: None,
-                url: None,
-                status: BindingStatus::Failed("error in binding container value".to_string()),
-            };
-            return Ok(resp);
+            return Err(BindingStatus::Failed(
+                "error in binding container value".to_string(),
+            ));
         }
     }
     unreachable!("unreachable code section")
 }
 
-#[axum::debug_handler]
 pub async fn close_terminal(
     Path(session_id): Path<String>,
     State(job_handle): State<Arc<DashMap<String, Sender<()>>>>,

@@ -9,8 +9,9 @@ use url::Url;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ContainerBindingResponse {
-    pub session_id: Option<String>,
-    pub url: Option<String>,
+    pub session_id: String,
+    pub url: String,
+    pub port: String,
     pub status: BindingStatus,
 }
 
