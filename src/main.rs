@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate dotenv_codegen;
+
 use std::sync::Arc;
 
 use axum::{routing::get, Router};
@@ -13,11 +16,11 @@ mod utils;
 async fn main() {
     dotenv::dotenv().ok();
 
-    // let port = format!("0.0.0.0:{}", dotenv!("SERVER_PORT"));
-    let port = format!(
-        "0.0.0.0:{}",
-        var("SERVER_PORT").unwrap_or("9001".to_string())
-    );
+    let port = format!("0.0.0.0:{}", dotenv!("TERM_SERVER_PORT"));
+    // let port = format!(
+    //     "0.0.0.0:{}",
+    //     var("SERVER_PORT").unwrap_or("9001".to_string())
+    // );
     println!("+ Server runnning on address: {port}");
 
     // Insert checks for presence for bore & ttyd !
