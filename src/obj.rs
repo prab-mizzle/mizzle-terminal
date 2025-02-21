@@ -5,7 +5,6 @@ use axum::{
 };
 use http_error_derive::HttpError;
 use serde::{Deserialize, Serialize};
-use url::Url;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ContainerBindingResponse {

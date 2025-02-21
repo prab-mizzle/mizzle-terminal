@@ -46,9 +46,7 @@ pub async fn open_terminal(
         }
     };
 
-    let ttyd_session = Command::new("sudo")
-        .arg("-n") // avoid password input for process
-        .arg("ttyd")
+    let ttyd_session = Command::new("ttyd")
         .arg("-O")
         .arg("-a")
         .arg("-W")
