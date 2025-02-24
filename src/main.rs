@@ -1,12 +1,13 @@
 #[macro_use]
 extern crate dotenv_codegen;
 
-use std::sync::Arc;
+use std::{sync::Arc};
 
 use axum::{routing::get, Router};
 use dashmap::DashMap;
 use dotenv::var;
 use tokio::sync::watch::Sender;
+use utils::shutdown_signal;
 
 mod obj;
 mod routes;
@@ -92,8 +93,10 @@ async fn main() {
         .with_state(global_handle_state);
 
     let app = Router::new().merge(route_1).merge(route_2);
-
-    if let Err(err) = axum::serve(listener, app).await {
+    let server = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()); 
+    if let Err(err) = server.await {
         println!("- error starting the application {err}");
     }
 }
+
+

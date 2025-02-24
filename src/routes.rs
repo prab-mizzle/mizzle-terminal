@@ -26,10 +26,16 @@ pub async fn open_terminal(
 ) -> impl IntoResponse {
     // apply checks for presence of container on system !
 
-    //todo: implement sanitation
-    let sanitized_instance_id = instance_id.trim().to_string();
+    let is_sanitized = instance_id.chars().all(|c| c.is_alphanumeric());
+    let char_count = instance_id.chars().count();
+    
+    //todo: ensure max string size is correct 
+    if !is_sanitized ||  char_count < 6 || char_count > 20  {
+        println!("- instance ID check failed");
+        return Err(BindingStatus::Failed("Incorrect instance id: {instance_id}".to_string()));
+    }
 
-    if let Some(session_id) = session_handle.get(&sanitized_instance_id) {
+    if let Some(session_id) = session_handle.get(&instance_id) {
         println!("+ session already found");
         return Err(BindingStatus::SessionRunning(session_id.clone()));
     }
@@ -48,13 +54,15 @@ pub async fn open_terminal(
 
     let ttyd_session = Command::new("ttyd")
         .arg("-O")
+        .arg("-o")
         .arg("-a")
         .arg("-W")
         .arg("-p")
         .arg(&random_port)
+        // .arg("bash")
         .arg("lxc")
         .arg("exec")
-        .arg(sanitized_instance_id)
+        .arg(instance_id)
         .arg("--")
         .arg("sh")
         .arg("-c")
@@ -70,6 +78,8 @@ pub async fn open_terminal(
         .arg(&random_port)
         .arg("--to")
         .arg("bore.pub")
+        // .arg("103.168.173.251:7835")
+        // .arg("mizzleterminal.mizzle.io")
         .stderr(Stdio::piped()) //change this our hosted instance
         .stdout(Stdio::piped()) //change this our hosted instance
         .kill_on_drop(true)
