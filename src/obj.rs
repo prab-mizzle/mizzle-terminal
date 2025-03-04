@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 pub struct ContainerBindingResponse {
     pub session_id: String,
     pub url: String,
-    pub port: String,
     pub status: BindingStatus,
 }
 
@@ -20,14 +19,12 @@ pub enum BindingStatus {
     Failed(String),
     Live,
     Error(String),
-    #[http(code = 500, message = "Failed to bind the port")]
-    PortAllocFailed(String),
     #[http(code = 500, message = "Error reading process value")]
     ProcessReadError(String),
-    #[http(code = 500, message = "Error port number not found")]
-    PortNotFound(String),
     #[http(code = 400, message = "Process already attached: url {0}")]
     SessionRunning(String),
+    #[http(code = 500, message = "File creation error by ttyd")]
+    FileCreationError(String),
 }
 
 impl IntoResponse for BindingStatus {

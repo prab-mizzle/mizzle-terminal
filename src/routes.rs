@@ -1,18 +1,22 @@
 use std::{process::Stdio, sync::Arc};
 
 use axum::{
-    extract::{Path, State},
+    body::Body,
+    extract::{ws::Message, Path, State, WebSocketUpgrade},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use dashmap::DashMap;
-use random_port::PortPicker;
+use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
+    net::UnixStream,
     process::Command,
     sync::watch::Sender,
     task::JoinHandle,
 };
+// use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
+use tokio_util::codec::{Framed, LinesCodec};
 
 use crate::obj::{BindingStatus, ContainerBindingResponse};
 
@@ -28,182 +32,102 @@ pub async fn open_terminal(
 
     let is_sanitized = instance_id.chars().all(|c| c.is_alphanumeric());
     let char_count = instance_id.chars().count();
-    
-    //todo: ensure max string size is correct 
-    if !is_sanitized ||  char_count < 6 || char_count > 20  {
+
+    //todo: ensure max string size is correct
+    if !is_sanitized || char_count < 6 || char_count > 20 {
         println!("- instance ID check failed");
-        return Err(BindingStatus::Failed("Incorrect instance id: {instance_id}".to_string()));
+        return Err(BindingStatus::Failed(
+            "Incorrect instance id: {instance_id}".to_string(),
+        ));
     }
 
     if let Some(session_id) = session_handle.get(&instance_id) {
         println!("+ session already found");
         return Err(BindingStatus::SessionRunning(session_id.clone()));
     }
+    let uds_session_name = uuid::Uuid::new_v4().as_hyphenated().to_string();
 
-    // select port range for starting ttyd instance
-    let random_port = match PortPicker::new().pick() {
-        Ok(val) => {
-            println!("+ Port binding succeed on: {val}");
-            format!("{val}")
-        }
-        Err(err) => {
-            println!("- Port binding failed");
-            return Err(BindingStatus::PortAllocFailed(err.to_string()));
-        }
-    };
+    //todo: check if files which are created has 660 permission or not
+    let sessin_path = format!("/tmp/{}.sock", uds_session_name);
+
+    let args = vec![
+        "-O",
+        "-o",
+        "-a",
+        "-W",
+        "-i",
+        &uds_session_name,
+        "lxc",
+        "exec",
+        &instance_id,
+        "--",
+        "sh",
+        "-c",
+        r#"/bin/bash"#,
+    ];
 
     let ttyd_session = Command::new("ttyd")
-        .arg("-O")
-        .arg("-o")
-        .arg("-a")
-        .arg("-W")
-        .arg("-p")
-        .arg(&random_port)
-        // .arg("bash")
-        .arg("lxc")
-        .arg("exec")
-        .arg(instance_id)
-        .arg("--")
-        .arg("sh")
-        .arg("-c")
-        .arg(r#"/bin/bash"#)
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn();
 
-    let bore_session = Command::new("bore")
-        .arg("local")
-        .arg(&random_port)
-        .arg("--to")
-        .arg("bore.pub")
-        // .arg("103.168.173.251:7835")
-        // .arg("mizzleterminal.mizzle.io")
-        .stderr(Stdio::piped()) //change this our hosted instance
-        .stdout(Stdio::piped()) //change this our hosted instance
-        .kill_on_drop(true)
-        .spawn();
+    match ttyd_session {
+        Ok(mut ttyd) => {
+            println!("+ listening on domain socket: {uds_session_name}");
 
-    match (ttyd_session, bore_session) {
-        (Ok(mut ttyd), Ok(mut bore)) => {
-            //we would ignore logging ttyd for now !
-            if let Some(bore_stdout) = bore.stdout.take() {
-                let mut bore_stdout = BufReader::new(bore_stdout).lines();
-                let first_line = bore_stdout.next_line().await;
+            let (mut tx, mut recv) = tokio::sync::watch::channel(());
 
-                if let Ok(Some(log)) = first_line {
-                    // Split the string by whitespace and get the last part
-                    println!("port line: {log}");
+            tokio::spawn(async move {
+                let ttyd_pid = ttyd.id();
+                tokio::select! {
+                    _ = ttyd.wait() => {
+                            // when bore finishes it must ensure that any associated ttyd task is also dropped
 
-                    //acquire port value which bore has been binded with !
-                    let port_str = if let Some(last_part) = log.split_whitespace().last() {
-                        // Extract the number after `remote_port=`
-                        if let Some(number) = last_part.split('=').last() {
-                            println!("+ Listening port: {}", number);
+                        // bore.kill().await;
+                    }
 
-                            // Split the string at 'm' and take the part after it.
-                            if let Some(digits) = number.rsplit('m').next() {
-                                println!("Extracted digits: {}", digits);
-                                digits.to_string()
-                            } else {
-                                println!("- No digits found in port !");
-                                bore.kill().await;
-                                ttyd.kill().await;
-                                return Err(BindingStatus::PortNotFound(
-                                    "Failed to acquire port from logs".to_string(),
-                                ));
+                    _ = recv.changed() =>  {
+                        println!("- task shutdown req : ");
+
+                        match ttyd.kill().await {
+                            Ok(_) => {
+                                println!("+ process shutdown success: pid ttyd: {ttyd_pid:?}");
                             }
-                        } else {
-                            bore.kill().await;
-                            ttyd.kill().await;
-                            return Err(BindingStatus::PortNotFound(
-                                "Failed to acquire port from logs".to_string(),
-                            ));
-                        }
-                    } else {
-                        bore.kill().await;
-                        ttyd.kill().await;
-                        return Err(BindingStatus::PortNotFound(
-                            "Port value not found in logs !".to_string(),
-                        ));
-                    };
-                    println!("port value: {:?}", port_str);
-                    let domain = format!(r#"http://bore.pub:{}"#, port_str);
-                    println!("+ listening on domain : {domain}");
-                    let session_uid = uuid::Uuid::new_v4().as_hyphenated().to_string();
-
-                    let (mut tx, mut recv) = tokio::sync::watch::channel(());
-
-                    tokio::spawn(async move {
-                        let ttyd_pid = ttyd.id();
-                        tokio::select! {
-                            _ = ttyd.wait() => {
-                                 // when bore finishes it must ensure that any associated ttyd task is also dropped
-                                //  tokio::join!(ttyd.kill(), bore.kill());
-                                // bore.kill().await;
-                                bore.kill().await;
-                            }
-                            _ = bore.wait() => {
-                                // when bore finishes it must ensure that any associated ttyd task is also dropped
-                                ttyd.kill().await;
-                            }
-                            _ = recv.changed() =>  {
-                                println!("- task shutdown req : ");
-
-                                match (bore.kill().await, ttyd.kill().await) {
-                                    (Ok(_), Ok(_)) => {
-                                        println!("+ process shutdown success: pid ttyd: {ttyd_pid:?}");
-                                    }
-                                    _ => {
-                                        println!(" - process failed abruptly !");
-                                    }
-                                }
-                                ()
+                            _ => {
+                                println!(" - process failed abruptly !");
                             }
                         }
                         ()
-                    });
-
-                    job_handle.insert(session_uid.clone(), tx);
-
-                    let container_binding_resp = ContainerBindingResponse {
-                        session_id: session_uid,
-                        url: domain, //todo: change this to something concrete
-                        port: port_str.to_string(),
-                        status: BindingStatus::Live,
-                    };
-
-                    return Ok(container_binding_resp);
-                } else {
-                    println!("- Port reading error");
-                    bore.kill().await;
-                    ttyd.kill().await;
-                    return Err(BindingStatus::ProcessReadError(
-                        "error reading process line".to_string(),
-                    ));
+                    }
                 }
-            }
+                ()
+            });
+
+            job_handle.insert(uds_session_name.clone(), tx);
+            session_handle.insert(instance_id.clone(), uds_session_name.clone());
+
+            let domain = format!(
+                "http://localhost:8080/{}/{}",
+                dotenv!("MACHINE_ID"),
+                uds_session_name
+            );
+            let container_binding_resp = ContainerBindingResponse {
+                session_id: uds_session_name,
+                url: domain, //todo: change this to something concrete
+                status: BindingStatus::Live,
+            };
+
+            return Ok(container_binding_resp);
         }
-        (Ok(_), Err(bore_err)) => {
-            println!("- bore process failed to start: {bore_err}");
-            return Err(BindingStatus::Failed(format!(
-                "bore spawing error: {}",
-                bore_err.to_string()
-            )));
-        }
-        (Err(ttyd_err), Ok(_)) => {
+        Err(ttyd_err) => {
             println!("- ttyd process failed to start: {ttyd_err}");
             return Err(BindingStatus::Failed(format!(
                 "ttyd spawing error: {}",
                 ttyd_err.to_string()
             )));
-        }
-        _ => {
-            println!("process failed to start");
-            return Err(BindingStatus::Failed(
-                "error in binding container value".to_string(),
-            ));
         }
     }
     unreachable!("unreachable code section")
@@ -218,6 +142,7 @@ pub async fn close_terminal(
             if let Some((sess, handle)) = job_handle.remove(&session_id) {
                 handle.send(()); // cancel this running task
                 println!("+ dropped session: {sess}");
+                // todo: remove the session from session_handle hashmap
                 Response::new("+ successfully closed the terminal session".to_string())
             } else {
                 println!("- failed to close session id");
@@ -233,4 +158,80 @@ pub async fn close_terminal(
     };
 
     return resp;
+}
+
+pub async fn access_terminal(
+    ws: WebSocketUpgrade,
+    Path(session_id): Path<String>,
+    State(job_handle): State<Arc<DashMap<String, Sender<()>>>>,
+) -> impl IntoResponse {
+    if job_handle.contains_key(&session_id) {
+        //we don't require sanitation code here, since we already have verified
+        // the right session id is already verified to be present in the hashmap
+        let recv = job_handle
+            .get(&session_id)
+            .expect("we have preverfied the presence of key in dashmap")
+            .subscribe();
+
+        ws.on_upgrade(move |socket| handle_websocket(socket, session_id, recv))
+    } else {
+        println!("- web socket session not found");
+        let body = Body::new(format!("- task not found for session uid in hashmap"));
+        let mut resp = Response::new(body);
+        *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        resp
+    }
+}
+
+// async fn websocket_handler(ws: WebSocketUpgrade, Path(session_id): Path<String>) -> impl IntoResponse {
+//     ws.on_upgrade(move |socket| handle_websocket(socket, session_id))
+// }
+
+// WebSocket Proxy Handler
+async fn handle_websocket(
+    socket: axum::extract::ws::WebSocket,
+    session_id: String,
+    mut recv: tokio::sync::watch::Receiver<()>,
+) {
+    let unix_socket_path = format!("/tmp/{}.sock", session_id);
+
+    match UnixStream::connect(&unix_socket_path).await {
+        Ok(unix_stream) => {
+            let (mut user_ws_sender, mut user_ws_receiver) = socket.split();
+            let (mut tty_sender, mut tty_receiver) =
+                Framed::new(unix_stream, LinesCodec::new()).split();
+            // let (mut tty_sender , mut tty_recv) = Framed::new()
+
+            let user_to_tty = async move {
+                while let Some(Ok(msg)) = user_ws_receiver.next().await {
+                    if let Message::Text(text) = msg {
+                        let text_str = text.to_string();
+                        let _ = tty_sender.send(text_str).await;
+                    }
+                }
+            };
+
+            let tty_to_user = async move {
+                while let Some(Ok(line)) = tty_receiver.next().await {
+                    let _ = user_ws_sender.send(Message::Text(line.into())).await;
+                }
+            };
+
+            tokio::select! {
+                _ = user_to_tty => {
+                    println!("+ user_to_tty task completed");
+                },
+                _ = tty_to_user => {
+                    println!("+ tty_to_user task completed");
+                },
+                _ = recv.changed() => {
+                    println!("+ task shutdown req : ");
+                    return;
+                }
+            }
+        }
+        Err(err) => {
+            eprintln!("Failed to connect to ttyd socket: {}", err);
+        }
+    }
 }
