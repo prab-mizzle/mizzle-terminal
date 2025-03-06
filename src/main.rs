@@ -19,7 +19,11 @@ mod utils;
 async fn main() {
     dotenv::dotenv().ok();
 
-    let port = format!("0.0.0.0:{}", dotenv!("TERM_SERVER_PORT"));
+    let port = format!(
+        "{}:{}",
+        dotenv!("SERVER_INTERFACE_ADDR"),
+        dotenv!("TERM_SERVER_PORT")
+    );
     println!("+ Server runnning on address: {port}");
 
     // Insert checks for presence for bore & ttyd !
@@ -55,9 +59,11 @@ async fn main() {
     };
 
     // maps instances id  with session id
-    let mut global_instance_state: Arc<DashMap<String, String>> = Arc::new(DashMap::new());
+    let global_instance_state: Arc<DashMap<String, String>> = Arc::new(DashMap::new());
+
     // maps session_id with instance task handle
-    let mut global_handle_state: Arc<DashMap<String, Sender<()>>> = Arc::new(DashMap::new());
+    // key => session_id, value => (instance_id, Sender)
+    let global_handle_state: Arc<DashMap<String, (String, Sender<()>)>> = Arc::new(DashMap::new());
 
     let route_1 = Router::new()
         .route(
@@ -67,16 +73,12 @@ async fn main() {
         .with_state((global_handle_state.clone(), global_instance_state.clone()));
     let route_2 = Router::new()
         .route("/terminate_web_session/{uid}", get(routes::close_terminal))
-        .with_state(global_handle_state.clone());
-    let route_3 = Router::new()
-        .route(
-            "/access_terminal/{session_id}",
-            get(routes::access_terminal),
-        )
-        .with_state(global_handle_state.clone());
+        .with_state((global_handle_state.clone(), global_instance_state.clone()));
 
-    let app = Router::new().merge(route_1).merge(route_2).merge(route_3);
+    let app = Router::new().merge(route_1).merge(route_2);
+
     let server = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal());
+
     if let Err(err) = server.await {
         println!("- error starting the application {err}");
     }
