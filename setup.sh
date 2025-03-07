@@ -70,8 +70,9 @@ configure_caddy() {
 }
 EOF
 
+    #sudo caddy run --config /etc/caddy/Caddyfile
     sudo systemctl enable --now caddy
-    echo "Caddy has been installed and configured! Access it at http://localhost:2301"
+    echo "Caddy has been installed and configured! Access it at http://localhost:8018"
 }
 
 install_caddy

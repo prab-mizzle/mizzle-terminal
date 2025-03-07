@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use axum::{routing::get, Router};
 use dashmap::DashMap;
-use dotenv::var;
 use tokio::sync::watch::Sender;
 use utils::shutdown_signal;
 
