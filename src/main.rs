@@ -1,11 +1,12 @@
 #[macro_use]
 extern crate dotenv_codegen;
 
+use core::time;
 use std::sync::Arc;
 
 use axum::{routing::get, Router};
 use dashmap::DashMap;
-use tokio::sync::watch::Sender;
+use tokio::{sync::watch::Sender, time::Instant};
 use utils::shutdown_signal;
 
 mod obj;
@@ -61,8 +62,44 @@ async fn main() {
     let global_instance_state: Arc<DashMap<String, String>> = Arc::new(DashMap::new());
 
     // maps session_id with instance task handle
-    // key => session_id, value => (instance_id, Sender)
-    let global_handle_state: Arc<DashMap<String, (String, Sender<()>)>> = Arc::new(DashMap::new());
+    // key => session_id, value => (instance_id, Sender, starting_time)
+    let global_handle_state: Arc<DashMap<String, (String, Sender<()>, Instant)>> = Arc::new(DashMap::new());
+
+    let global_instance_state_clone = global_instance_state.clone();
+    let global_handle_state_clone = global_handle_state.clone();
+
+    tokio::spawn(async move {
+        let timeout_duration = dotenv!("TTYD_SESSION_TIMEOUT").parse::<u64>().unwrap_or(3600);
+        let tokio_timeout_duration = time::Duration::from_secs(timeout_duration);
+
+        loop {
+            //give some 5 secs pause for the next iteration
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+            let current_time = Instant::now();
+
+            global_handle_state_clone.retain(|_, value| {
+                let ttyd_task_starting_time = value.2;
+                let instance_id = value.0.clone();
+                let time_elasped = current_time - ttyd_task_starting_time;
+                if time_elasped < tokio_timeout_duration {
+                    true
+                } else {
+                    // send signal to the task to terminate
+                    if let Ok(val) = value.1.send(()) {
+                        println!("+ dropped session: {instance_id}");
+                        global_instance_state_clone.remove(&value.0);
+                        false
+                    } else {
+                        println!("- failed to send signal to task: {instance_id}");
+                        false
+                    }
+                }
+            });
+            
+        }
+    });
+
 
     let route_1 = Router::new()
         .route(

@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ContainerBindingResponse {
-    pub session_id: String,
+    pub terminal_session_name: String,
+    pub access_token: String,
     pub url: String,
     pub status: BindingStatus,
 }
@@ -56,4 +57,24 @@ impl IntoResponse for ContainerBindingResponse {
                 .into_response(),
         }
     }
+}
+
+// #[derive(Debug, Serialize, Deserialize)]
+// pub struct Claims {
+//     pub aud: String,
+//     pub uid: String,
+//     pub user_id: String,
+//     pub username: String, 
+//     pub login: String, 
+//     pub exp: u64,
+// }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    pub exp: u64,
+    pub jti: String,
+    pub sub: String,
+    pub iss: String,
+    pub aud: Vec<String>,
+    pub username: String,
 }

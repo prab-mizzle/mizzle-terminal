@@ -10,6 +10,7 @@ dotenv = { version = "0.15.0", features = ["cli"] }
 dotenv_codegen = "0.15.0"
 futures = "0.3.31"
 http-error-derive = "0.3.2"
+jsonwebtoken = "9.3.1"
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
 tokio = { version = "1.43.0", features = ["full", "rt-multi-thread"] }
