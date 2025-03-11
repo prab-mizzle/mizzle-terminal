@@ -37,7 +37,7 @@ pub async fn open_terminal(
     let uds_session_name = uuid::Uuid::new_v4().as_hyphenated().to_string();
 
     //todo: check if files which are created has 660 permission or not
-    let session_path = format!("/tmp/{}.sock", uds_session_name);
+    let session_path = format!("{}{}.sock", dotenv!("UNIX_SOCKET_FOLDER"), uds_session_name);
 
     let args = vec![
         "-O",
