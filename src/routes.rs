@@ -20,7 +20,7 @@ use crate::obj::{BindingStatus, ContainerBindingResponse};
 pub async fn open_terminal(
     Path(instance_id): Path<String>,
     State((mut job_handle, session_handle)): State<(
-        Arc<DashMap<String, Sender<()>>>,
+        Arc<DashMap<String, (String, Sender<()>, tokio::time::Instant)>>,
         Arc<DashMap<String, String>>,
     )>,
 ) -> impl IntoResponse {
@@ -165,34 +165,47 @@ pub async fn open_terminal(
                         ()
                     });
 
-                    job_handle.insert(session_uid.clone(), tx);
+            // update hashmaps for proper information
+            job_handle.insert(uds_session_name.clone(), (instance_id.clone(), tx, tokio::time::Instant::now()));
+            session_handle.insert(instance_id.clone(), uds_session_name.clone());
+
+            let mut domain = dotenv!("SERVING_NAME").to_string();
+            let mut main_path = dotenv!("MACHINE_ID").to_string();
+            if !main_path.is_empty() {
+                domain.push_str("/");
+            }
+            main_path.push_str(format!("/{}", uds_session_name).as_str());
+            domain.push_str(main_path.as_str());
+
+            let jwt_secret = dotenv!("MZ_TERM_JWT_SINGING_SECRET"); 
+            println!("+ jwt secret: {jwt_secret}");
+            
+            let jwt_timeout = dotenv!("MZ_TERM_JWT_TIMEOUT").parse::<u64>().unwrap_or(3600);
+            
+            match crate::utils::jwt_token_generator(jwt_timeout, jwt_secret) {
+                Ok(token) => {
+                    
+                    //add token header as part of domain!
+                    domain.push_str(format!("?token={}", token).as_str());
 
                     let container_binding_resp = ContainerBindingResponse {
-                        session_id: session_uid,
-                        url: domain, //todo: change this to something concrete
-                        port: port_str.to_string(),
+                        terminal_session_name: uds_session_name,
+                        access_token: token,
+                        url: domain,
                         status: BindingStatus::Live,
                     };
 
                     return Ok(container_binding_resp);
-                } else {
-                    println!("- Port reading error");
-                    bore.kill().await;
-                    ttyd.kill().await;
-                    return Err(BindingStatus::ProcessReadError(
-                        "error reading process line".to_string(),
-                    ));
+                }
+                Err(_) => {
+                    return Err(BindingStatus::Error("JWT token generation failed".to_string()));
                 }
             }
+
+
+
         }
-        (Ok(_), Err(bore_err)) => {
-            println!("- bore process failed to start: {bore_err}");
-            return Err(BindingStatus::Failed(format!(
-                "bore spawing error: {}",
-                bore_err.to_string()
-            )));
-        }
-        (Err(ttyd_err), Ok(_)) => {
+        Err(ttyd_err) => {
             println!("- ttyd process failed to start: {ttyd_err}");
             return Err(BindingStatus::Failed(format!(
                 "ttyd spawing error: {}",
@@ -211,7 +224,10 @@ pub async fn open_terminal(
 
 pub async fn close_terminal(
     Path(session_id): Path<String>,
-    State(job_handle): State<Arc<DashMap<String, Sender<()>>>>,
+    State((mut job_handle, session_handle)): State<(
+        Arc<DashMap<String, (String, Sender<()>, tokio::time::Instant)>>,
+        Arc<DashMap<String, String>>,
+    )>,
 ) -> impl IntoResponse {
     let resp = match job_handle.contains_key(&session_id) {
         true => {
